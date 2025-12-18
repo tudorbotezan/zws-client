@@ -14,7 +14,8 @@ jobs:
       - name: Install Zig
         run: |
           curl -fsSL https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar -xJ
-          echo "$ZIG_PATH" >> $GITHUB_PATH
+          mv zig-linux-x86_64-0.15.2 zig
+          echo "${{ github.workspace }}/zig" >> $GITHUB_PATH
       - name: Build library
         run: zig build -Drelease-fast
       - name: Run tests
