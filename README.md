@@ -23,7 +23,7 @@ zig fetch --save https://github.com/tudorbotezan/zws-client/archive/v0.0.1.tar.g
 Then in your `build.zig`:
 
 ```zig
-const zws = b.dependency("zws_client", .{
+const zws = b.dependency("zws-client", .{
     .target = target,
     .optimize = optimize,
 });
