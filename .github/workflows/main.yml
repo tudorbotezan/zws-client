@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Zig
+        run: |
+          curl -fsSL https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar -xJ
+          mv zig-x86_64-linux-0.15.2 zig
+          echo "${{ github.workspace }}/zig" >> $GITHUB_PATH
+      - name: Build library
+        run: zig build -Doptimize=ReleaseFast
+      - name: Run tests
+        run: zig build test --summary all
