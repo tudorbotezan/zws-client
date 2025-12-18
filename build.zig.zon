@@ -1,0 +1,13 @@
+.{
+    .name = .zws_client,
+    .version = "0.0.1",
+    .fingerprint = 0x17e779e0c2eaec77,
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+        "README.md",
+    },
+}

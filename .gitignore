@@ -1,0 +1,30 @@
+# Build artifacts
+build/
+*.o
+*.obj
+*.so
+*.dll
+
+# Zig cache and output
+.zig-cache/
+zig-out/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Environment secrets
+.env
+.env.local
+
+# Logs
+*.log
+
+# Editor folders
+.vscode/
+.idea/
+
+# Temporary files
+*~
+*.tmp
+*.bak
