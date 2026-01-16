@@ -12,7 +12,9 @@ pub fn main() !void {
 
     var tcp = try std.net.tcpConnectToHost(allocator, hostname, port);
     defer tcp.close();
-    var cli = try ws.client(allocator, tcp.reader(), tcp.writer(), uri);
+    var read_buffer: [4096]u8 = undefined;
+    var write_buffer: [4096]u8 = undefined;
+    var cli = try ws.client(allocator, tcp.reader(&read_buffer), tcp.writer(&write_buffer), uri);
     defer cli.deinit();
 
     try cli.send(.text, "hello world", true);

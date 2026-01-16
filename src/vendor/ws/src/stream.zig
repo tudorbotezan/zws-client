@@ -330,14 +330,14 @@ pub fn Writer(comptime WriterType: type) type {
             assert(payload.len < 126);
             const frame = Frame{ .fin = 1, .opcode = .pong, .payload = payload, .mask = 1 };
             const bytes = frame.encode(self.buf, 0);
-            try self.writer.writeAll(self.buf[0..bytes]);
+            _ = try self.writer.writeAll(self.buf[0..bytes]);
         }
 
         pub fn close(self: *Self, code: u16, payload: []const u8) !void {
             assert(payload.len < 124);
             const frame = Frame{ .fin = 1, .opcode = .close, .payload = payload, .mask = 1 };
             const bytes = frame.encode(self.buf, code);
-            try self.writer.writeAll(self.buf[0..bytes]);
+            _ = try self.writer.writeAll(self.buf[0..bytes]);
         }
 
         pub fn message(self: *Self, encoding: Message.Encoding, payload: []const u8, compressed: bool) !void {
@@ -361,7 +361,7 @@ pub fn Writer(comptime WriterType: type) type {
                 const frame = Frame{ .fin = fin, .rsv1 = rsv1, .opcode = opcode, .payload = frame_payload, .mask = 1 };
                 // encode frame into write_buf and send it to stream
                 const bytes = frame.encode(self.buf, 0);
-                try self.writer.writeAll(self.buf[0..bytes]);
+                _ = try self.writer.writeAll(self.buf[0..bytes]);
                 // loop if something is left
                 sent_payload += frame_payload.len;
                 if (sent_payload >= payload.len) {

@@ -89,7 +89,10 @@ pub fn Client(comptime ReaderType: type, comptime WriterType: type) type {
 
         pub fn writeRequest(self: *Self, uri: []const u8) !void {
             var buf: [1024]u8 = undefined;
-            try self.writer.writeAll(try requestBufPrint(&buf, uri, &self.sec_key));
+            const data = try requestBufPrint(&buf, uri, &self.sec_key);
+            
+            // Write using the writer directly 
+            try self.writer.writeAll(data);
         }
 
         pub fn assertValidResponse(self: *Self) !void {
