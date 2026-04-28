@@ -1,15 +1,23 @@
 const std = @import("std");
 const ws = @import("ws");
-const net = std.net;
+const net = std.Io.net;
 const tls = std.crypto.tls;
 
 pub const TlsWebSocketClient = struct {
     allocator: std.mem.Allocator,
+    io_threaded: std.Io.Threaded,
     tcp_stream: ?net.Stream = null,
+    stream_reader: ?net.Stream.Reader = null,
+    stream_writer: ?net.Stream.Writer = null,
     tls_client: ?*tls.Client = null,
     ws_stream: ?ws.stream.Stream(TlsReader, TlsWriter) = null,
-    ca_bundle: ?std.crypto.Certificate.Bundle = null,
+    ca_bundle_lock: std.Io.RwLock = .init,
+    ca_bundle: std.crypto.Certificate.Bundle = .empty,
     owns_bundle: bool = false,
+    socket_read_buffer: ?[]u8 = null,
+    socket_write_buffer: ?[]u8 = null,
+    tls_read_buffer: ?[]u8 = null,
+    tls_write_buffer: ?[]u8 = null,
     connected: bool = false,
     url: []const u8,
 
@@ -18,12 +26,13 @@ pub const TlsWebSocketClient = struct {
     // Wrapper types for TLS reader/writer
     const TlsReader = struct {
         tls_client: *tls.Client,
-        tcp_stream: net.Stream,
 
         pub const Error = anyerror; // Use generic error for now
 
         pub fn read(self: TlsReader, buffer: []u8) Error!usize {
-            return self.tls_client.read(self.tcp_stream, buffer);
+            return self.tls_client.reader.readSliceShort(buffer) catch |err| switch (err) {
+                error.ReadFailed => self.tls_client.read_err orelse err,
+            };
         }
 
         pub fn readByte(self: TlsReader) !u8 {
@@ -39,7 +48,7 @@ pub const TlsWebSocketClient = struct {
             delimiter: u8,
             max_size: usize,
         ) ![]u8 {
-            var array_list = std.ArrayList(u8){};
+            var array_list: std.ArrayList(u8) = .empty;
             defer array_list.deinit(allocator);
 
             while (array_list.items.len < max_size) {
@@ -58,43 +67,51 @@ pub const TlsWebSocketClient = struct {
 
     const TlsWriter = struct {
         tls_client: *tls.Client,
-        tcp_stream: net.Stream,
 
         pub const Error = anyerror; // Use generic error for now
 
         pub fn write(self: TlsWriter, buffer: []const u8) Error!usize {
-            return self.tls_client.write(self.tcp_stream, buffer);
+            return self.tls_client.writer.write(buffer);
         }
 
         pub fn writeAll(self: TlsWriter, buffer: []const u8) Error!void {
-            return self.tls_client.writeAll(self.tcp_stream, buffer);
+            try self.tls_client.writer.writeAll(buffer);
+            try self.tls_client.writer.flush();
         }
     };
 
     pub fn init(allocator: std.mem.Allocator, url: []const u8, ca_bundle: ?std.crypto.Certificate.Bundle) Self {
         return .{
             .allocator = allocator,
+            .io_threaded = .init(allocator, .{}),
             .url = url,
-            .ca_bundle = ca_bundle,
+            .ca_bundle = ca_bundle orelse .empty,
+            .owns_bundle = ca_bundle == null,
         };
+    }
+
+    fn io(self: *Self) std.Io {
+        return self.io_threaded.io();
     }
 
     pub fn connect(self: *Self) !void {
         const uri = try std.Uri.parse(self.url);
-        const host_component = uri.host orelse return error.InvalidUrl;
-        const host = switch (host_component) {
-            .raw => |h| h,
-            .percent_encoded => |h| h,
-        };
-        const port: u16 = uri.port orelse 443;
+        if (!std.mem.eql(u8, uri.scheme, "wss")) {
+            return error.UnsupportedScheme;
+        }
 
-        std.debug.print("Connecting to {s}:{d} with TLS...\n", .{ host, port });
+        var host_buffer: [net.HostName.max_len]u8 = undefined;
+        const host = uri.getHost(&host_buffer) catch return error.InvalidUrl;
+        const port: u16 = uri.port orelse 443;
+        const io_handle = self.io();
+
+        std.debug.print("Connecting to {s}:{d} with TLS...\n", .{ host.bytes, port });
 
         // Connect TCP
-        self.tcp_stream = try net.tcpConnectToHost(self.allocator, host, port);
+        self.tcp_stream = try host.connect(io_handle, port, .{ .mode = .stream });
         errdefer {
             if (self.tcp_stream) |tcp| {
-                tcp.close();
+                tcp.close(self.io());
                 self.tcp_stream = null;
             }
         }
@@ -108,33 +125,57 @@ pub const TlsWebSocketClient = struct {
             }
         }
 
-        // Initialize CA bundle if not already provided
-        if (self.ca_bundle == null) {
-            var bundle = std.crypto.Certificate.Bundle{};
-            try bundle.rescan(self.allocator);
-            self.ca_bundle = bundle;
-            self.owns_bundle = true;
+        self.socket_read_buffer = try self.allocator.alloc(u8, tls.Client.min_buffer_len);
+        errdefer self.freeBuffer(&self.socket_read_buffer);
+        self.socket_write_buffer = try self.allocator.alloc(u8, tls.Client.min_buffer_len);
+        errdefer self.freeBuffer(&self.socket_write_buffer);
+        self.tls_read_buffer = try self.allocator.alloc(u8, tls.Client.min_buffer_len);
+        errdefer self.freeBuffer(&self.tls_read_buffer);
+        self.tls_write_buffer = try self.allocator.alloc(u8, tls.Client.min_buffer_len);
+        errdefer self.freeBuffer(&self.tls_write_buffer);
+
+        self.stream_reader = self.tcp_stream.?.reader(io_handle, self.socket_read_buffer.?);
+        self.stream_writer = self.tcp_stream.?.writer(io_handle, self.tls_write_buffer.?);
+
+        const now = std.Io.Clock.real.now(io_handle);
+        if (self.owns_bundle) {
+            try self.ca_bundle.rescan(self.allocator, io_handle, now);
         }
+
+        var entropy: [tls.Client.Options.entropy_len]u8 = undefined;
+        io_handle.random(&entropy);
 
         // Initialize TLS client with proper options
         const tls_options = tls.Client.Options{
-            .host = .{ .explicit = host },
-            .ca = .{ .bundle = self.ca_bundle.? },
+            .host = .{ .explicit = host.bytes },
+            .ca = .{ .bundle = .{
+                .gpa = self.allocator,
+                .io = io_handle,
+                .lock = &self.ca_bundle_lock,
+                .bundle = &self.ca_bundle,
+            } },
+            .read_buffer = self.tls_read_buffer.?,
+            .write_buffer = self.socket_write_buffer.?,
+            .entropy = &entropy,
+            .realtime_now = now,
+            .allow_truncation_attacks = true,
         };
 
-        self.tls_client.?.* = tls.Client.init(self.tcp_stream.?, tls_options) catch |err| {
+        self.tls_client.?.* = tls.Client.init(&self.stream_reader.?.interface, &self.stream_writer.?.interface, tls_options) catch |err| {
             std.debug.print("TLS init error: {}\n", .{err});
-            return err;
+            return switch (err) {
+                error.WriteFailed => self.stream_writer.?.err orelse err,
+                error.ReadFailed => self.stream_reader.?.err orelse err,
+                else => err,
+            };
         };
 
         // Create readers/writers for WebSocket
         const tls_reader = TlsReader{
             .tls_client = self.tls_client.?,
-            .tcp_stream = self.tcp_stream.?,
         };
         const tls_writer = TlsWriter{
             .tls_client = self.tls_client.?,
-            .tcp_stream = self.tcp_stream.?,
         };
 
         // Perform WebSocket handshake
@@ -148,19 +189,8 @@ pub const TlsWebSocketClient = struct {
         self.connected = true;
         std.debug.print("TLS WebSocket connected!\n", .{});
 
-        // Now set socket to non-blocking mode after handshake is complete
-        const builtin = @import("builtin");
-        if (builtin.os.tag == .windows) {
-            // Windows: use ioctlsocket with FIONBIO
-            const ws2_32 = std.os.windows.ws2_32;
-            var nonblocking: u32 = 1;
-            _ = ws2_32.ioctlsocket(@ptrCast(self.tcp_stream.?.handle), ws2_32.FIONBIO, &nonblocking);
-        } else {
-            // Unix-like systems: use fcntl
-            const sock_flags = try std.posix.fcntl(self.tcp_stream.?.handle, std.posix.F.GETFL, 0);
-            const nonblock_flag = if (@hasDecl(std.posix.O, "NONBLOCK")) std.posix.O.NONBLOCK else 0x0004; // O_NONBLOCK on macOS
-            _ = try std.posix.fcntl(self.tcp_stream.?.handle, std.posix.F.SETFL, sock_flags | nonblock_flag);
-        }
+        // Now set socket to non-blocking mode after handshake is complete.
+        try setNonBlocking(self.tcp_stream.?.socket.handle);
     }
 
     pub fn sendText(self: *Self, text: []const u8) !void {
@@ -224,14 +254,21 @@ pub const TlsWebSocketClient = struct {
         }
 
         if (self.tcp_stream) |tcp| {
-            tcp.close();
+            tcp.close(self.io());
             self.tcp_stream = null;
         }
 
-        if (self.ca_bundle != null and self.owns_bundle) {
-            self.ca_bundle.?.deinit(self.allocator);
-            self.ca_bundle = null;
-            self.owns_bundle = false;
+        self.stream_reader = null;
+        self.stream_writer = null;
+
+        self.freeBuffer(&self.socket_read_buffer);
+        self.freeBuffer(&self.socket_write_buffer);
+        self.freeBuffer(&self.tls_read_buffer);
+        self.freeBuffer(&self.tls_write_buffer);
+
+        if (self.owns_bundle) {
+            self.ca_bundle.deinit(self.allocator);
+            self.ca_bundle = .empty;
         }
 
         self.connected = false;
@@ -239,5 +276,36 @@ pub const TlsWebSocketClient = struct {
 
     pub fn deinit(self: *Self) void {
         self.close();
+        self.io_threaded.deinit();
+    }
+
+    fn freeBuffer(self: *Self, buffer: *?[]u8) void {
+        if (buffer.*) |slice| {
+            self.allocator.free(slice);
+            buffer.* = null;
+        }
+    }
+
+    fn setNonBlocking(fd: std.posix.fd_t) !void {
+        const builtin = @import("builtin");
+        switch (builtin.os.tag) {
+            .linux => {
+                const linux = std.os.linux;
+                const get_rc = linux.fcntl(fd, linux.F.GETFL, 0);
+                switch (std.posix.errno(get_rc)) {
+                    .SUCCESS => {},
+                    else => return error.Unexpected,
+                }
+
+                var flags: std.posix.O = @bitCast(@as(u32, @intCast(get_rc)));
+                flags.NONBLOCK = true;
+                const set_rc = linux.fcntl(fd, linux.F.SETFL, @as(u32, @bitCast(flags)));
+                switch (std.posix.errno(set_rc)) {
+                    .SUCCESS => {},
+                    else => return error.Unexpected,
+                }
+            },
+            else => {},
+        }
     }
 };

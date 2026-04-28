@@ -1,5 +1,5 @@
 const std = @import("std");
-const io = std.io;
+const io = @import("io_compat.zig");
 const bit_reader = @import("bit_reader.zig");
 const mem = std.mem;
 

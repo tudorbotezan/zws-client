@@ -3,7 +3,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 const ascii = std.ascii;
 const mem = std.mem;
-const io = std.io;
+const io = @import("io_compat.zig");
 const fmt = std.fmt;
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
@@ -90,8 +90,8 @@ pub fn Client(comptime ReaderType: type, comptime WriterType: type) type {
         pub fn writeRequest(self: *Self, uri: []const u8) !void {
             var buf: [1024]u8 = undefined;
             const data = try requestBufPrint(&buf, uri, &self.sec_key);
-            
-            // Write using the writer directly 
+
+            // Write using the writer directly
             try self.writer.writeAll(data);
         }
 
@@ -188,7 +188,7 @@ pub fn Client(comptime ReaderType: type, comptime WriterType: type) type {
             const status_description = status_line[sp2 + 1 ..];
 
             // parse headers
-            var headers = std.ArrayList(Header){};
+            var headers: std.ArrayList(Header) = .empty;
             defer headers.deinit(self.arena.allocator());
             while (true) {
                 var header_line = try self.reader.readUntilDelimiterAlloc(self.arena.allocator(), '\n', max_response_line_len);
@@ -370,7 +370,7 @@ pub const Rsp = struct {
         };
         if (first_line[8] != ' ') return error.HttpHeadersInvalid;
         const status: http.Status = @enumFromInt(try std.fmt.parseInt(u10, first_line[9..12], 10));
-        const reason = mem.trimLeft(u8, first_line[12..], " ");
+        const reason = mem.trimStart(u8, first_line[12..], " ");
         _ = reason;
         _ = version;
 

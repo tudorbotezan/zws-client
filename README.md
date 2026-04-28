@@ -2,15 +2,15 @@
 
 A high-performance, standalone WebSocket client library for Zig.
 
-**Target Zig Version:** 0.15.2 (Compatible with the latest I/O and `std.ArrayList` changes)
+**Target Zig Version:** 0.16.0
 
 ## Key Features
 
 - **`WebSocketClient`**: Lightweight, non-blocking client for `ws://` connections.
 - **`TlsWebSocketClient`**: Secure `wss://` client with **full CA certificate verification** via `std.crypto.tls`.
-- **Zero External Dependencies**: Core WebSocket logic is fully vendored and patched for the latest Zig toolchain.
+- **Zero External Dependencies**: Core WebSocket logic is fully vendored and patched for Zig 0.16.0.
 - **Non-blocking I/O**: Designed for integration into event loops or simple polling structures.
-- **Memory Efficient**: Uses the latest Zig 0.15.2 patterns for explicit memory management.
+- **Memory Efficient**: Uses Zig 0.16.0-compatible explicit memory management patterns.
 
 ## Installation
 
@@ -80,13 +80,19 @@ zig build
 zig build test --summary all
 ```
 
+For a side-by-side local Zig 0.16.0 toolchain without changing any global Zig install:
+
+```bash
+./.zig-toolchains/zig-x86_64-linux-0.16.0/zig build test --summary all
+```
+
 The static library artifact will be generated in `zig-out/lib/`.
 
 ## Changelog
 
 ### v0.0.1
 
-- **Initial Release for Zig 0.15.2**: Full migration to the new standard library I/O and `ArrayList` unmanaged APIs.
+- **Initial Release for Zig 0.16.0**: Full migration to the latest standard library I/O and `ArrayList` APIs.
 - **Vendored Core**: Integrated and patched the dependency logic into `src/vendor/ws/`.
 - **BitReader Polyfill**: Custom implementation added to replace the removed `std.io.BitReader`.
 - **Compression**: `per_message_deflate` is currently stubbed for stability due to `std.compress.flate` overhauls.

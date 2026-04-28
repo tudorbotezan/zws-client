@@ -1,5 +1,5 @@
 const std = @import("std");
-const io = std.io;
+const io = @import("io_compat.zig");
 const mem = std.mem;
 
 pub fn TestingStream(comptime output_len: usize) type {

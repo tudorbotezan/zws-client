@@ -1,6 +1,7 @@
 .{
     .name = .zws_client,
     .version = "0.0.1",
+    .minimum_zig_version = "0.16.0",
     .fingerprint = 0x17e779e0c2eaec77,
     .dependencies = .{},
     .paths = .{
