@@ -17,7 +17,7 @@ A high-performance, standalone WebSocket client library for Zig.
 Add `zws-client` to your `build.zig.zon`:
 
 ```sh
-zig fetch --save https://github.com/tudorbotezan/zws-client/archive/v0.0.1.tar.gz
+zig fetch --save https://github.com/tudorbotezan/zws-client/archive/v0.0.2.tar.gz
 ```
 
 Then in your `build.zig`:
@@ -89,6 +89,11 @@ For a side-by-side local Zig 0.16.0 toolchain without changing any global Zig in
 The static library artifact will be generated in `zig-out/lib/`.
 
 ## Changelog
+
+### v0.0.2
+
+- **Zig 0.16.0 Support**: Updated package metadata, CI, and client internals for Zig 0.16.0.
+- **Vendored I/O Compatibility**: Added a small compatibility layer for the vendored WebSocket core.
 
 ### v0.0.1
 
